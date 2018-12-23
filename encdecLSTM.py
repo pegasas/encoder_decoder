@@ -1,4 +1,3 @@
-
 # coding: utf-8
 
 # ## A Dual-Stage Attention-Based Recurrent Neural Network for Time Series Prediction
@@ -6,9 +5,7 @@
 # pytorch example: http://pytorch.org/tutorials/intermediate/seq2seq_translation_tutorial.html
 
 # In[1]:
-import sys
-reload(sys)
-sys.setdefaultencoding('utf8')
+
 import torch
 from torch import nn
 from torch.autograd import Variable
@@ -17,15 +14,17 @@ import torch.nn.functional as F
 
 import matplotlib
 # matplotlib.use('Agg')
-# from IPython import get_ipython
-# get_ipython().magic(u'matplotlib inline')
+get_ipython().magic(u'matplotlib inline')
 
 import datetime as dt, itertools, pandas as pd, matplotlib.pyplot as plt, numpy as np
 
-import logging
+import utility as util
 
+global logger
 
-logger = logging.getLogger("kkm")
+util.setup_log()
+util.setup_path()
+logger = util.logger
 
 use_cuda = torch.cuda.is_available()
 logger.info("Is CUDA available? %s.", use_cuda)
@@ -64,7 +63,7 @@ class encoder(nn.Module):
                            input_data.permute(0, 2, 1)), dim = 2) # batch_size * input_size * (2*hidden_size + T - 1)
             # Eqn. 9: Get attention weights
             x = self.attn_linear(x.view(-1, self.hidden_size * 2 + self.T - 1)) # (batch_size * input_size) * 1
-            attn_weights = F.softmax(F.tanh(x.view(-1, self.input_size))) # batch_size * input_size, attn weights with values sum up to 1.
+            attn_weights = F.softmax(x.view(-1, self.input_size)) # batch_size * input_size, attn weights with values sum up to 1.
             # Eqn. 10: LSTM
             weighted_input = torch.mul(attn_weights, input_data[:, t, :]) # batch_size * input_size
             # Fix the warning about non-contiguous memory
@@ -141,12 +140,12 @@ class da_rnn:
     def __init__(self, file_data, logger, encoder_hidden_size = 64, decoder_hidden_size = 64, T = 10,
                  learning_rate = 0.01, batch_size = 128, parallel = True, debug = False):
         self.T = T
-        dat = pd.read_csv(file_data, nrows = 100 if debug else None, encoding="ISO-8859-1")
+        dat = pd.read_csv(file_data, nrows = 100 if debug else None)
         self.logger = logger
         self.logger.info("Shape of data: %s.\nMissing in data: %s.", dat.shape, dat.isnull().sum().sum())
 
-        self.X = dat.loc[:, [x for x in dat.columns.tolist() if x != 'NDX']].as_matrix()
-        self.y = np.array(dat.NDX)
+        self.X = dat.loc[:, [x for x in dat.columns.tolist() if x != 'co2_flux']].as_matrix()
+        self.y = np.array(dat.co2_flux)
         self.batch_size = batch_size
 
         self.encoder = encoder(input_size = self.X.shape[1], hidden_size = encoder_hidden_size, T = T,
@@ -224,32 +223,6 @@ class da_rnn:
                 y_train_pred = self.predict(on_train = True)
                 y_test_pred = self.predict(on_train = False)
                 y_pred = np.concatenate((y_train_pred, y_test_pred))
-                import codecs
-
-
-                f = codecs.open("y_train_pred","w",encoding="utf-8",errors='ignore')
-                for y in y_train_pred:
-                    f.write(str(y)+"\n")
-                f.close()
-
-                f = codecs.open("y_test_pred","w",encoding="utf-8",errors='ignore')
-                for y in y_test_pred:
-                    f.write(str(y)+"\n")
-                f.close()
-
-                f = codecs.open("y_pred","w",encoding="utf-8",errors='ignore')
-                for y in y_pred:
-                    f.write(str(y)+"\n")
-                f.close()
-
-                f = codecs.open("y","w",encoding="utf-8",errors='ignore')
-                for y in self.y:
-                    f.write(str(y)+"\n")
-                f.close()
-
-                sys.exit(0)
-
-                plt.switch_backend('agg')
                 plt.figure()
                 plt.plot(range(1, 1 + len(self.y)), self.y, label = "True")
                 plt.plot(range(self.T , len(y_train_pred) + self.T), y_train_pred, label = 'Predicted - Train')
@@ -265,7 +238,7 @@ class da_rnn:
         y_pred = self.decoder(input_encoded, Variable(torch.from_numpy(y_history).type(torch.FloatTensor).cuda()))
 
         y_true = Variable(torch.from_numpy(y_target).type(torch.FloatTensor).cuda())
-        loss = self.loss_func(y_pred.squeeze(1), y_true)
+        loss = self.loss_func(y_pred, y_true)
         loss.backward()
 
         self.encoder_optimizer.step()
@@ -304,7 +277,10 @@ class da_rnn:
 
 
 # In[ ]:
-model = da_rnn(file_data = 'nasdaq100_padding.csv', logger = logger, parallel = False,
+
+io_dir = '~/nasdaq'
+
+model = da_rnn(file_data = 'op_total_fake.csv', logger = logger, parallel = False,
               learning_rate = .001)
 
 model.train(n_epochs = 500)
