@@ -14,17 +14,10 @@ import torch.nn.functional as F
 
 import matplotlib
 # matplotlib.use('Agg')
-get_ipython().magic(u'matplotlib inline')
+# get_ipython().magic(u'matplotlib inline')
 
 import datetime as dt, itertools, pandas as pd, matplotlib.pyplot as plt, numpy as np
-
-import utility as util
-
-global logger
-
-util.setup_log()
-util.setup_path()
-logger = util.logger
+import logging as logger
 
 use_cuda = torch.cuda.is_available()
 logger.info("Is CUDA available? %s.", use_cuda)
@@ -137,8 +130,8 @@ class decoder(nn.Module):
 
 # Train the model
 class da_rnn:
-    def __init__(self, file_data, logger, encoder_hidden_size = 64, decoder_hidden_size = 64, T = 10,
-                 learning_rate = 0.01, batch_size = 128, parallel = True, debug = False):
+    def __init__(self, file_data, logger, encoder_hidden_size = 128, decoder_hidden_size = 64, T = 10,
+                 learning_rate = 0.001, batch_size = 128, parallel = True, debug = False):
         self.T = T
         dat = pd.read_csv(file_data, nrows = 100 if debug else None)
         self.logger = logger
@@ -165,10 +158,11 @@ class da_rnn:
         # self.learning_rate = learning_rate
 
         self.train_size = int(self.X.shape[0] * 0.7)
-        self.y = self.y - np.mean(self.y[:self.train_size]) # Question: why Adam requires data to be normalized?
+        self.X = self.X - np.mean(self.X)
+        self.y = self.y - np.mean(self.y) # Question: why Adam requires data to be normalized?
         self.logger.info("Training size: %d.", self.train_size)
 
-    def train(self, n_epochs = 10):
+    def train(self, n_epochs = 100):
         iter_per_epoch = int(np.ceil(self.train_size * 1. / self.batch_size))
         logger.info("Iterations per epoch: %3.3f ~ %d.", self.train_size * 1. / self.batch_size, iter_per_epoch)
         self.iter_losses = np.zeros(n_epochs * iter_per_epoch)
@@ -217,7 +211,8 @@ class da_rnn:
 
             self.epoch_losses[i] = np.mean(self.iter_losses[range(i * iter_per_epoch, (i + 1) * iter_per_epoch)])
             if i % 10 == 0:
-                self.logger.info("Epoch %d, loss: %3.3f.", i, self.epoch_losses[i])
+                print("Epoch %d, loss: %3.3f." % (i, self.epoch_losses[i]))
+                continue
 
             if i % 10 == 0:
                 y_train_pred = self.predict(on_train = True)
@@ -238,14 +233,13 @@ class da_rnn:
         y_pred = self.decoder(input_encoded, Variable(torch.from_numpy(y_history).type(torch.FloatTensor).cuda()))
 
         y_true = Variable(torch.from_numpy(y_target).type(torch.FloatTensor).cuda())
-        loss = self.loss_func(y_pred, y_true)
+        loss = self.loss_func(y_pred.squeeze(1), y_true)
         loss.backward()
 
         self.encoder_optimizer.step()
         self.decoder_optimizer.step()
 
-        # if loss.data[0] < 10:
-        #     self.logger.info("MSE: %s, loss: %s.", loss.data, (y_pred[:, 0] - y_true).pow(2).mean())
+        print("MSE: %s, loss: %s." % (loss.data, (y_pred[:, 0] - y_true).pow(2).mean()))
 
         return loss.data[0]
 
